@@ -1,0 +1,63 @@
+.gaugeContainer {
+  position: relative;
+  width: 100px;
+  height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gauge {
+  transform: rotate(-90deg);
+  width: 100%;
+  height: 100%;
+}
+
+.gaugeBackground {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 8;
+}
+
+.gaugeProgress {
+  fill: none;
+  stroke-width: 8;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s ease-out;
+}
+
+.gaugeProgress.safe {
+  stroke: var(--safe-color);
+  filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.6));
+}
+
+.gaugeProgress.warning {
+  stroke: var(--warning-color);
+  filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.6));
+}
+
+.gaugeProgress.danger {
+  stroke: var(--danger-color);
+  filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.6));
+}
+
+.gaugeText {
+  position: absolute;
+  display: flex;
+  align-items: baseline;
+}
+
+.score {
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.score.safe { color: var(--safe-color); }
+.score.warning { color: var(--warning-color); }
+.score.danger { color: var(--danger-color); }
+
+.label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-left: 2px;
+}

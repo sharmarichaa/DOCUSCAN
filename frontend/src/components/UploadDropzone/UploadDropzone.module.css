@@ -1,0 +1,85 @@
+.dropzone {
+  width: 100%;
+  padding: 40px 20px;
+  border: 2px dashed rgba(148, 163, 184, 0.3);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.dropzone.dragging {
+  border-color: var(--accent-color);
+  background: rgba(59, 130, 246, 0.05);
+  box-shadow: 0 0 30px rgba(59, 130, 246, 0.1) inset;
+}
+
+.fileInput {
+  display: none;
+}
+
+.label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.iconContainer {
+  background: rgba(255,255,255,0.05);
+  padding: 20px;
+  border-radius: 50%;
+  margin-bottom: 12px;
+}
+
+.icon {
+  color: var(--text-secondary);
+  transition: color 0.3s ease;
+}
+
+.dropzone:hover .icon, .dragging .icon {
+  color: var(--accent-color);
+}
+
+.label h3 {
+  font-size: 1.5rem;
+  color: var(--text-primary);
+}
+
+.label p {
+  color: var(--text-secondary);
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  width: 50%;
+  margin: 20px 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.divider::before, .divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.divider span {
+  padding: 0 10px;
+}
+
+.securityNote {
+  margin-top: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.securityNote p {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  max-width: 80%;
+  text-align: center;
+}
