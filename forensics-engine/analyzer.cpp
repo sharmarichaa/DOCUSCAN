@@ -19,13 +19,11 @@
 #include <set>
 #include <tesseract/baseapi.h>
 #include <vector>
+#include <tuple>
 
 using namespace std;
 using namespace cv;
 namespace fs = std::filesystem;
-
-// STRUCTS
-
 struct TamperRegion {
   int x, y, w, h;
   string type;
@@ -253,8 +251,6 @@ float getCloneScore(const Mat &image, vector<TamperRegion> &regions) {
   return max(0.0f, min(100.0f, 100.0f - penalty));
 }
 
-// OCR - Single pass for font + NLP
-
 struct OCRData {
   string text;
   map<int, vector<float>> zoneHeights;
@@ -271,14 +267,12 @@ OCRData performOCR(const Mat &image) {
   Mat gray;
   cvtColor(image, gray, COLOR_BGR2GRAY);
 
-  // Downscale large images for speed
   Mat processed = gray;
   if (gray.cols > 600) {
     float scale = 600.0f / gray.cols;
     resize(gray, processed, Size(), scale, scale);
   }
 
-  // Sharpen for better OCR accuracy
   Mat sharpened;
   GaussianBlur(processed, sharpened, Size(0, 0), 3);
   addWeighted(processed, 1.5, sharpened, -0.5, 0, sharpened);
@@ -286,12 +280,10 @@ OCRData performOCR(const Mat &image) {
   ocr.SetImage(sharpened.data, sharpened.cols, sharpened.rows, 1,
                sharpened.step);
 
-  // Extract text
   char *out = ocr.GetUTF8Text();
   data.text = string(out);
   delete[] out;
 
-  // Extract word bounding boxes for font consistency
   tesseract::ResultIterator *ri = ocr.GetIterator();
   tesseract::PageIteratorLevel level = tesseract::RIL_WORD;
   int zoneHeight = sharpened.rows / 3;
@@ -346,7 +338,7 @@ float getFontConsistencyScore(const map<int, vector<float>> &zoneHeights) {
   return max(0.0f, score);
 }
 
-// F5 - NLP Cross-Validation
+// F5 - NLP Cross Validation
 
 struct ExtractedData {
   vector<string> dates;
@@ -521,15 +513,24 @@ void printResult(const EngineResult &r) {
   cout << "    \"metadata\": " << r.metadataScore << "\n";
   cout << "  },\n";
   cout << "  \"regions\": [\n";
+  set<tuple<int,int,int,int,string>> seen;
+  bool firstRegion = true;
   for (size_t i = 0; i < r.regions.size(); i++) {
     const TamperRegion &reg = r.regions[i];
-    cout << "    {\"x\":" << reg.x << ",\"y\":" << reg.y << ",\"w\":" << reg.w
-         << ",\"h\":" << reg.h << ",\"type\":\"" << escapeJson(reg.type) << "\""
+    if (reg.confidence < 0.4f) continue;
+    if (reg.type == "uniform_overlay" && reg.confidence > 50.0f) continue;
+    auto key = make_tuple(reg.x, reg.y, reg.w, reg.h, reg.type);
+    if (seen.count(key)) continue;
+    seen.insert(key);
+    if (!firstRegion) cout << ",";
+    cout << "\n    {\"x\":" << reg.x << ",\"y\":" << reg.y
+         << ",\"w\":" << reg.w << ",\"h\":" << reg.h
+         << ",\"type\":\"" << escapeJson(reg.type) << "\""
          << ",\"confidence\":" << reg.confidence << "}";
-    if (i + 1 < r.regions.size())
-      cout << ",";
-    cout << "\n";
-  }
+    firstRegion = false;
+}
+cout << "\n";
+
   cout << "  ]\n";
   cout << "}" << endl;
 }
@@ -570,7 +571,6 @@ int main(int argc, char *argv[]) {
 
   EngineResult result;
 
-  // Downscale for fast analysis
   Mat analysisImage;
   float analysisScale = 1.0f;
   int targetWidth = 600;
@@ -581,7 +581,6 @@ int main(int argc, char *argv[]) {
     analysisImage = image;
   }
 
-  // Run all analyses in parallel
   float sScore, cScore, oScore, mScore;
   vector<TamperRegion> splicingRegs, cloneRegs, overlayRegs;
   Mat elaMap;
@@ -605,14 +604,12 @@ int main(int argc, char *argv[]) {
   auto t5 =
       async(launch::async, [&]() { mScore = getMetadataScore(inputPath); });
 
-  // Wait for all threads
   t1.get();
   t2.get();
   t3.get();
   t4.get();
   t5.get();
 
-  // Collect scores
   result.splicingScore = sScore;
   result.cloneScore = cScore;
   result.uniformOverlayScore = oScore;
@@ -620,7 +617,7 @@ int main(int argc, char *argv[]) {
   result.nlpScore = getNLPScore(ocrData.text);
   result.metadataScore = mScore;
 
-  // Scale regions back to original image coordinates
+
   float invScale = 1.0f / analysisScale;
   auto scaleRegs = [invScale](vector<TamperRegion> &regs) {
     for (auto &r : regs) {
@@ -661,7 +658,7 @@ int main(int argc, char *argv[]) {
                   : (result.trustScore >= 50) ? "SUSPICIOUS"
                                               : "REJECT";
 
-  // Generate output images at original resolution
+
   Mat elaFull;
   resize(elaMap, elaFull, image.size());
   Mat heatmapColor;
