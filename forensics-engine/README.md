@@ -3,30 +3,68 @@
 The core C++ engine powering DocuScan's document forgery detection pipeline.
 
 ## Overview
-This module analyzes documents at pixel and text level to detect signs of tampering. Outputs Trust Score (0-100) with breakdown of suspicion.
+Analyzes documents at pixel and text level to detect signs of tampering. Outputs a Trust Score (0-100) with full breakdown and exact coordinates of suspicious regions.
 
 ## Detection Capabilities
-| Factor | What it Detects |
-|--------|------------------|
-| Pixel-level integrity | Splicing, clone stamping, regional modifications |
-| Font consistency | Font mismatches across document regions |
-| NLP verification | Inconsistencies in names, figures and dates |
-| Metadata analysis | Traces of editing software or re-saving |
 
-## Output
-- Trust Score (0-100)
-- JSON formatted results
-- Heatmap image (heatmap.jpg)
-- Tamper overlay (overlay.jpg)
+| Factor | Weight | What it Detects |
+|--------|--------|-----------------|
+| Splicing (ELA) | 25% | Pixel-level tampering, copy-paste from another image |
+| Uniform Overlay | 15% | Solid box pasted over original content |
+| Font Consistency | 20% | Font mismatches across document regions |
+| NLP Verification | 15% | Inconsistencies in names, dates and figures |
+| Metadata Analysis | 15% | Traces of editing software in EXIF data |
+| Clone Stamping | 10% | Duplicate regions copy-pasted within same document |
 
 ## Tech Stack
 - Language: C++17
 - Image processing: OpenCV
 - OCR: Tesseract
-- Metadata: Built-in OpenCV
+- PDF support: Poppler
+- Metadata: Binary EXIF parsing
 
-## Build & Run
+## Dependencies (MSYS2 MinGW64)
 ```bash
-g++ analyzer.cpp -o analyzer -std=c++17 -IC:/msys64/mingw64/include/opencv4 -IC:/msys64/mingw64/include -LC:/msys64/mingw64/lib -lopencv_core -lopencv_imgcodecs -lopencv_imgproc -ltesseract
+pacman -S mingw-w64-x86_64-opencv mingw-w64-x86_64-tesseract-ocr mingw-w64-x86_64-poppler mingw-w64-x86_64-pkg-config
+```
 
-./analyzer.exe
+## Build
+```bash
+g++ -std=c++17 -O2 analyzer.cpp -o analyzer $(pkg-config --cflags --libs opencv4) $(pkg-config --cflags --libs tesseract) $(pkg-config --cflags --libs poppler-cpp) -lstdc++fs
+```
+
+## Run
+```bash
+./analyzer document.jpg
+./analyzer document.pdf
+```
+
+## Output
+
+| Score | Status |
+|-------|--------|
+| 75 - 100 | SAFE |
+| 50 - 74 | SUSPICIOUS |
+| 0 - 49 | REJECT |
+
+Two image files are saved after each run:
+- `heatmap.jpg` — ELA heatmap showing compression anomalies
+- `overlay.jpg` — Original document with tampered regions highlighted
+
+Sample JSON output:
+```json
+{
+  "trustScore": 85.2,
+  "status": "SAFE",
+  "processingTimeMs": 1200,
+  "scores": {
+    "splicing": 90.1,
+    "clone": 100,
+    "uniformOverlay": 80.0,
+    "font": 100,
+    "nlp": 100,
+    "metadata": 100
+  },
+  "regions": []
+}
+```
