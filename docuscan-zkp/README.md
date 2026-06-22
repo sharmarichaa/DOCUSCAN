@@ -52,11 +52,14 @@ docuscan-zkp/
 │   ├── zkp_demo.js
 │   ├── verify_only.js
 │   └── clean.js
+|   |__ server.js
+|   |__ zkp_api.js
 ├── circuits/
 │   └── document_hash.circom
 ├── proofs/
 ├── build/
 └── package.json
+|__ gitignore
 ```
 
 ---
