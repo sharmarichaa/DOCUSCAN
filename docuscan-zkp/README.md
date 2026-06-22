@@ -162,30 +162,33 @@ node scripts/clean.js
 
 ---
 
-## Troubleshooting
-| Error | Fix |
-| npm error ENOENT package.json | You are in the wrong folder. Run: cd docuscan-zk p|
-| circom: not recognized | Run: npm install -g circom |
-| snarkjs: not recognized | Run: npm install -g snarkjs |
-| Cannot find module 'snarkjs' | Run: npm install |
-| Cannot find module setup.js | Files not in scripts/ folder. Move them there. |
-| doc_hash_final.zkey not found | Run: node scripts/setup.js |
-| document_hash.r1cs not found | Run: circom circuits/document_hash.circom --r1cs --wasm --sym -o build/ |
-| Stuck more than 2 minutes | Press Ctrl+C then run node scripts/setup.js again (it resumes) |
-| ENOENT on zkey new (Windows) | cd build then run snarkjs commands from inside build/ folder |
+## 🔧 Troubleshooting
 
+| Error                         | Fix                                                                       |
+| ----------------------------- | ------------------------------------------------------------------------- |
+| npm error ENOENT package.json | You are in the wrong folder. Run: `cd docuscan-zkp`                       |
+| circom: not recognized        | Run: `npm install -g circom`                                              |
+| snarkjs: not recognized       | Run: `npm install -g snarkjs`                                             |
+| Cannot find module 'snarkjs'  | Run: `npm install`                                                        |
+| Cannot find module setup.js   | Files are not in the `scripts/` folder. Move them there.                  |
+| doc_hash_final.zkey not found | Run: `node scripts/setup.js`                                              |
+| document_hash.r1cs not found  | Run: `circom circuits/document_hash.circom --r1cs --wasm --sym -o build/` |
+| Stuck more than 2 minutes     | Press `Ctrl+C` then run `node scripts/setup.js` again (it resumes)        |
+| ENOENT on zkey new (Windows)  | `cd build` then run SnarkJS commands from inside the `build/` folder      |
 
-## How the ZKP Works
+---
 
-|Stage |	What happens |
-| 1. Document uploaded |	SHA-256 hash computed from file bytes — document content discarded after |
-| 2. Hash split |	256-bit hash split into two 128-bit BN128 field elements: hash_hi, hash_lo |
-| 3. ZK proof generated |	Groth16 fullProve: content_hi/lo as private witness → π_A, π_B, π_C produced |
-| 4. Commitment stored |	Only hash_hi, hash_lo, doc_version stored — raw content NEVER stored |
-| 5. Re-submission |	Document re-uploaded → re-hashed → compared against stored commitment |
-| 6. ZK verification |	groth16.verify: pairing check e(π_A,π_B)·e(−vk_α,vk_β) = 1 on BN128 |
-| 7. Verdict |	VERIFIED (Trust 100/100) or FORGERY DETECTED (Trust 8/100) |
+## ⚙️ How the ZKP Works
 
+| Stage                     | What Happens                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **1. Document uploaded**  | SHA-256 hash computed from file bytes. Document content is discarded immediately afterward.                  |
+| **2. Hash split**         | 256-bit hash split into two 128-bit BN128 field elements: `hash_hi` and `hash_lo`.                           |
+| **3. ZK proof generated** | Groth16 `fullProve()` uses `content_hi` and `content_lo` as a private witness to generate π_A, π_B, and π_C. |
+| **4. Commitment stored**  | Only `hash_hi`, `hash_lo`, and `doc_version` are stored. Raw document content is never stored.               |
+| **5. Re-submission**      | The document is uploaded again, re-hashed, and compared against the stored commitment.                       |
+| **6. ZK verification**    | `groth16.verify()` performs the BN128 pairing check: `e(π_A, π_B) · e(-vk_α, vk_β) = 1`.                     |
+| **7. Verdict**            | Returns either **VERIFIED (Trust Score 100/100)** or **FORGERY DETECTED (Trust Score 8/100)**.               |
 
 ---
 
