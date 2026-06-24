@@ -339,15 +339,11 @@ float getFontConsistencyScore(const map<int, vector<float>> &zoneHeights) {
 
     float cv = stddev / (mean + 0.01f);
 
-    // Too INCONSISTENT — high variation indicates mixed fonts
     if (cv > 0.5f)
       score -= 20;
     else if (cv > 0.35f)
       score -= 8;
 
-    // Too UNIFORM — suspiciously low variation indicates synthetic text
-    // Real camera photos of printed text always have natural variation
-    // from printing quality, camera angle, lighting, paper texture
     if (cv < 0.03f && heights.size() >= 5) {
       tooUniformZones++;
       score -= 15;
@@ -357,7 +353,6 @@ float getFontConsistencyScore(const map<int, vector<float>> &zoneHeights) {
     }
   }
 
-  // If multiple zones are suspiciously uniform, extra penalty
   if (tooUniformZones >= 2)
     score -= 15;
 
@@ -628,8 +623,6 @@ float getDoubleJpegScore(const Mat &image) {
 }
 
 // F9 - Text Region vs Background Noise Comparison
-// Key insight: Canva renders synthetic text with ZERO noise on a camera background.
-// Real printed text photographed by camera has the SAME noise as background.
 
 float getTextNoiseScore(const Mat &image, const vector<Rect> &wordBoxes,
                         vector<TamperRegion> &regions) {
@@ -638,13 +631,11 @@ float getTextNoiseScore(const Mat &image, const vector<Rect> &wordBoxes,
   Mat gray;
   cvtColor(image, gray, COLOR_BGR2GRAY);
 
-  // Compute noise map via Laplacian
   Mat laplacian;
   Laplacian(gray, laplacian, CV_64F, 3);
   Mat absLap;
   convertScaleAbs(laplacian, absLap);
 
-  // Compute global background noise level using MEAN (not stddev)
   Scalar globalMean = cv::mean(absLap);
   double bgNoiseMean = globalMean[0];
 
@@ -662,12 +653,10 @@ float getTextNoiseScore(const Mat &image, const vector<Rect> &wordBoxes,
 
     analyzedBoxes++;
 
-    // Mean noise energy inside the text bounding box
     Mat textRegion = absLap(box);
     Scalar textMean = cv::mean(textRegion);
     double textNoiseMean = textMean[0];
 
-    // Mean noise energy in the surrounding area (expand box by 100%)
     int expand = max(box.width, box.height);
     int sx = max(0, box.x - expand);
     int sy = max(0, box.y - expand);
@@ -684,9 +673,6 @@ float getTextNoiseScore(const Mat &image, const vector<Rect> &wordBoxes,
     double ratio = textNoiseMean / surroundNoiseMean;
     totalRatio += (float)ratio;
 
-    // Synthetic text has different noise energy than surroundings
-    // Canva text: very sharp edges (HIGH Laplacian ratio > 1.5)
-    // Camera text: slightly blurred edges (ratio ~ 0.9-1.3)
     if (ratio < 0.5 || ratio > 1.5) {
       syntheticTextCount++;
       TamperRegion r;
@@ -708,12 +694,10 @@ float getTextNoiseScore(const Mat &image, const vector<Rect> &wordBoxes,
 
   float score = 100.0f;
 
-  // If many text regions have anomalous noise ratios
   if (syntheticFraction > 0.4f) score -= 40;
   else if (syntheticFraction > 0.2f) score -= 25;
   else if (syntheticFraction > 0.1f) score -= 15;
 
-  // Average noise ratio deviation from 1.0
   float deviation = abs(avgRatio - 1.0f);
   if (deviation > 0.5f) score -= 30;
   else if (deviation > 0.3f) score -= 20;
@@ -723,27 +707,22 @@ float getTextNoiseScore(const Mat &image, const vector<Rect> &wordBoxes,
 }
 
 // F10 - Fine-grained Edit Boundary Detection
-// Detects exact edited regions by comparing each small block to its neighbors.
-// Edited areas (like Canva text) create sharp noise discontinuities.
 
 void detectEditBoundaries(const Mat &image, vector<TamperRegion> &regions) {
   Mat gray;
   cvtColor(image, gray, COLOR_BGR2GRAY);
 
-  // High-pass filter to extract noise/texture
   Mat laplacian;
   Laplacian(gray, laplacian, CV_64F, 3);
   Mat absLap;
   convertScaleAbs(laplacian, absLap);
 
-  // Use 12px blocks for balance of precision and stability
   int blockSize = 12;
   int rows = gray.rows / blockSize;
   int cols = gray.cols / blockSize;
 
   if (rows < 4 || cols < 4) return;
 
-  // Compute noise energy for each block
   vector<vector<float>> noiseMap(rows, vector<float>(cols, 0));
   for (int r = 0; r < rows; r++) {
     for (int c = 0; c < cols; c++) {
@@ -753,7 +732,6 @@ void detectEditBoundaries(const Mat &image, vector<TamperRegion> &regions) {
     }
   }
 
-  // For each block, compare to its neighbors (3x3 window)
   vector<vector<bool>> suspicious(rows, vector<bool>(cols, false));
 
   for (int r = 1; r < rows - 1; r++) {
@@ -785,7 +763,6 @@ void detectEditBoundaries(const Mat &image, vector<TamperRegion> &regions) {
     }
   }
 
-  // Cluster adjacent suspicious blocks via flood fill
   vector<vector<bool>> visited(rows, vector<bool>(cols, false));
 
   for (int r = 1; r < rows - 1; r++) {
@@ -819,7 +796,6 @@ void detectEditBoundaries(const Mat &image, vector<TamperRegion> &regions) {
         }
       }
 
-      // Only report clusters with at least 3 blocks
       if (clusterSize >= 3) {
         TamperRegion reg;
         reg.x = minC * blockSize;
@@ -967,7 +943,7 @@ int main(int argc, char *argv[]) {
                   [&]() { djScore = getDoubleJpegScore(analysisImage); });
 
   auto t8 = async(launch::async, [&]() {
-    detectEditBoundaries(image, editRegs);  // Full-res for precision
+    detectEditBoundaries(image, editRegs);  
   });
 
   t1.get();
@@ -988,8 +964,7 @@ int main(int argc, char *argv[]) {
   result.noiseScore = nScore;
   result.doubleJpegScore = djScore;
 
-  // F9: Text-vs-background noise (must run AFTER OCR completes)
-  // Use analysisImage so word box coords match (OCR ran on analysisImage)
+  // F9: Text vsbackground noise 
   float tnScore;
   vector<TamperRegion> textNoiseRegs;
   tnScore = getTextNoiseScore(analysisImage, ocrData.wordBoxes, textNoiseRegs);
@@ -1010,11 +985,9 @@ int main(int argc, char *argv[]) {
   scaleRegs(noiseRegs);
   scaleRegs(textNoiseRegs);
 
-  // Merge nearby synthetic_text regions into forged_area groups
-  // Only group regions that are within 80px of each other
   vector<TamperRegion> mergedForgedAreas;
   vector<bool> used(textNoiseRegs.size(), false);
-  int proxThreshold = 80; // pixels proximity for grouping
+  int proxThreshold = 80; 
 
   for (size_t i = 0; i < textNoiseRegs.size(); i++) {
     if (used[i]) continue;
@@ -1027,7 +1000,6 @@ int main(int argc, char *argv[]) {
     float maxConf = textNoiseRegs[i].confidence;
     int groupSize = 1;
 
-    // Find all nearby regions
     bool changed = true;
     while (changed) {
       changed = false;
@@ -1038,7 +1010,6 @@ int main(int argc, char *argv[]) {
         int rx2 = rx + textNoiseRegs[j].w;
         int ry2 = ry + textNoiseRegs[j].h;
 
-        // Check proximity to current group
         bool near = (rx < maxX + proxThreshold && rx2 > minX - proxThreshold &&
                      ry < maxY + proxThreshold && ry2 > minY - proxThreshold);
         if (near) {
@@ -1054,7 +1025,6 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    // Only report groups with 2+ regions
     if (groupSize >= 2) {
       int pad = 10;
       TamperRegion merged;
@@ -1077,7 +1047,6 @@ int main(int argc, char *argv[]) {
   regions.insert(regions.end(), editRegs.begin(), editRegs.end());
   regions.insert(regions.end(), mergedForgedAreas.begin(), mergedForgedAreas.end());
 
-  // Merge nearby edit_boundary regions into tampered_area
   vector<bool> editUsed(editRegs.size(), false);
   for (size_t i = 0; i < editRegs.size(); i++) {
     if (editUsed[i]) continue;
@@ -1095,7 +1064,7 @@ int main(int argc, char *argv[]) {
         if (editUsed[j]) continue;
         int rx = editRegs[j].x, ry = editRegs[j].y;
         int rx2 = rx + editRegs[j].w, ry2 = ry + editRegs[j].h;
-        // Group within 60px proximity (tight to avoid photo-edge false positives)
+
         if (rx < maxX + 60 && rx2 > minX - 60 &&
             ry < maxY + 60 && ry2 > minY - 60) {
           editUsed[j] = true;
@@ -1122,7 +1091,6 @@ int main(int argc, char *argv[]) {
 
   result.regions = regions;
 
-  //              splice clone overlay font   nlp    meta   noise  dblJpg txtNoise
   float weights[] = {0.12f, 0.07f, 0.08f, 0.12f, 0.12f, 0.08f, 0.12f, 0.09f, 0.20f};
   float scores[] = {
       result.splicingScore, result.cloneScore, result.uniformOverlayScore,
@@ -1148,13 +1116,12 @@ int main(int argc, char *argv[]) {
   if (result.textNoiseScore < 50)
     finalScore *= 0.70f;
 
-  // Hard penalty: if tampered_area detected, strong evidence of forgery
   bool hasTamperedArea = false;
   for (const auto &r : regions) {
     if (r.type == "tampered_area") hasTamperedArea = true;
   }
   if (hasTamperedArea)
-    finalScore *= 0.55f;  // Severe penalty for detected edit region
+    finalScore *= 0.55f; 
 
   result.trustScore = max(0.0f, min(100.0f, finalScore));
   result.status = (result.trustScore >= 70)   ? "SAFE"
