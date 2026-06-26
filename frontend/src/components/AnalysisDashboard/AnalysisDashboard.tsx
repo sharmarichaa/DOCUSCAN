@@ -73,10 +73,22 @@ export const AnalysisDashboard: React.FC<Props> = ({ file, result, onReset }) =>
              <div className={styles.documentWrapper}>
                {currentImage ? (
                  <img src={currentImage} alt={`Document Page ${currentPage + 1}`} className={styles.documentImage} />
+               ) : file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf') ? (
+                 <object 
+                   data={URL.createObjectURL(file) + "#toolbar=0&navpanes=0&scrollbar=0"} 
+                   type="application/pdf" 
+                   className={styles.documentImage}
+                   style={{ width: '100%', height: '600px', minHeight: '60vh' }}
+                 >
+                   <div className={styles.mockPdfPreview}>
+                     <p>PDF Preview Mode</p>
+                     <small>Browser does not support inline PDFs. <br/><a href={URL.createObjectURL(file)} target="_blank" rel="noreferrer">Click here to view</a></small>
+                   </div>
+                 </object>
                ) : (
                  <div className={styles.mockPdfPreview}>
-                    <p>PDF Preview Mode (Page {currentPage + 1})</p>
-                    <small>Backend generated image would appear here.</small>
+                    <p>Preview Not Available</p>
+                    <small>Unsupported file type or preview generation failed.</small>
                  </div>
                )}
 

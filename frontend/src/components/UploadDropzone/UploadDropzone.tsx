@@ -9,6 +9,8 @@ interface Props {
 export const UploadDropzone: React.FC<Props> = ({ onUpload }) => {
   const [isDragging, setIsDragging] = useState(false);
 
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -30,10 +32,13 @@ export const UploadDropzone: React.FC<Props> = ({ onUpload }) => {
   }, [onUpload]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.preventDefault();
     if (e.target.files && e.target.files[0]) {
       onUpload(e.target.files[0]);
     }
+  };
+
+  const handleBrowseClick = () => {
+    inputRef.current?.click();
   };
 
   return (
@@ -46,12 +51,13 @@ export const UploadDropzone: React.FC<Props> = ({ onUpload }) => {
     >
       <input 
         type="file" 
-        id="file-upload" 
+        ref={inputRef}
         className={styles.fileInput} 
         onChange={handleChange}
+        onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
         accept=".pdf,.png,.jpg,.jpeg"
       />
-      <label htmlFor="file-upload" className={styles.label}>
+      <div className={styles.label}>
         <div className={styles.iconContainer}>
           <UploadCloud size={48} className={styles.icon} />
         </div>
@@ -60,13 +66,10 @@ export const UploadDropzone: React.FC<Props> = ({ onUpload }) => {
         <div className={styles.divider}>
           <span>OR</span>
         </div>
-        <button className="btn-primary" onClick={(e) => {
-          e.preventDefault();
-          document.getElementById('file-upload')?.click();
-        }}>
+        <button type="button" className="btn-primary" onClick={handleBrowseClick}>
           Browse Files
         </button>
-      </label>
+      </div>
       
       <div className={styles.securityNote}>
         <span className="badge safe" style={{fontSize: '0.7rem', marginBottom: '8px', display: 'inline-block'}}>Zero-Knowledge Secure</span>

@@ -22,7 +22,7 @@
  */
 
 "use strict";
-const { execSync } = require("child_process");
+const { execSync, execFile, exec } = require("child_process");
 const crypto       = require("crypto");
 const fs           = require("fs");
 const path         = require("path");
@@ -36,6 +36,13 @@ const WASM  = path.join(BUILD, "document_hash.wasm");
 const ZKEY  = path.join(BUILD, "doc_hash_final.zkey");
 const VKEY  = path.join(OUT,   "verification_key.json");
 const DB    = path.join(OUT,   "registrations.json");  // persistent file store
+
+// ── SIBLING ENGINE PATHS ──────────────────────────────────────────────────
+const PROJECT_ROOT   = path.resolve(ROOT, "..");
+const FORENSICS_EXE  = path.join(PROJECT_ROOT, "forensics-engine", "analyzer.exe");
+const ML_SCRIPT      = path.join(PROJECT_ROOT, "ml-model", "infer_onnx.py");
+const ML_MODEL_DIR   = path.join(PROJECT_ROOT, "ml-model");
+const TEMP_DIR       = path.join(ROOT, "temp");
 
 // ── REGISTRY — saved to proofs/registrations.json (survives restarts) ────
 function loadReg() {
@@ -82,6 +89,87 @@ function checkSetup() {
   if (missing.length) {
     throw new Error("ZKP setup not complete. Run: node scripts/setup.js");
   }
+}
+
+// ── TEMP FILE HELPERS ─────────────────────────────────────────────────────
+function ensureTemp() {
+  fs.mkdirSync(TEMP_DIR, { recursive: true });
+}
+
+function saveTempFile(buffer, filename) {
+  ensureTemp();
+  const safeName = `${Date.now()}_${filename.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+  const filePath = path.join(TEMP_DIR, safeName);
+  fs.writeFileSync(filePath, buffer);
+  return filePath;
+}
+
+function cleanupFile(filePath) {
+  try { fs.unlinkSync(filePath); } catch {}
+}
+
+// ── FORENSICS ENGINE ──────────────────────────────────────────────────────
+/**
+ * Run the C++ forensics analyzer on a document file.
+ * @param {string} filePath - Path to the document (image or PDF)
+ * @returns {Promise<object|null>} - Parsed JSON result or null on failure
+ */
+function runForensicsEngine(filePath) {
+  return new Promise((resolve) => {
+    if (!fs.existsSync(FORENSICS_EXE)) {
+      console.warn("⚠️  Forensics engine not found at:", FORENSICS_EXE);
+      resolve(null);
+      return;
+    }
+
+    execFile(FORENSICS_EXE, [filePath], { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) {
+        console.error("❌ Forensics engine error:", err.message);
+        resolve(null);
+        return;
+      }
+      try {
+        const jsonMatch = stdout.match(/\{[\s\S]*\}/);
+        resolve(jsonMatch ? JSON.parse(jsonMatch[0]) : null);
+      } catch (parseErr) {
+        console.error("❌ Failed to parse forensics JSON:", parseErr.message);
+        resolve(null);
+      }
+    });
+  });
+}
+
+// ── ML MODEL ──────────────────────────────────────────────────────────────
+/**
+ * Run the Python ONNX ML inference on an image file.
+ * @param {string} imagePath - Path to image (must be jpg/png)
+ * @returns {Promise<object|null>} - Parsed JSON result or null on failure
+ */
+function runMLModel(imagePath) {
+  return new Promise((resolve) => {
+    if (!fs.existsSync(ML_SCRIPT)) {
+      console.warn("⚠️  ML model script not found at:", ML_SCRIPT);
+      resolve(null);
+      return;
+    }
+
+    const cmd = `python "${ML_SCRIPT}" "${imagePath}"`;
+    const mlEnv = { ...process.env, PYTHONUTF8: "1" };
+    exec(cmd, { timeout: 60_000, maxBuffer: 10 * 1024 * 1024, cwd: ML_MODEL_DIR, env: mlEnv }, (err, stdout, stderr) => {
+      if (err) {
+        console.error("❌ ML model error:", err.message);
+        resolve(null);
+        return;
+      }
+      try {
+        const jsonMatch = stdout.match(/\{[\s\S]*\}/);
+        resolve(jsonMatch ? JSON.parse(jsonMatch[0]) : null);
+      } catch (parseErr) {
+        console.error("❌ Failed to parse ML JSON:", parseErr.message);
+        resolve(null);
+      }
+    });
+  });
 }
 
 /**
@@ -250,4 +338,150 @@ function getRegistrationStatus(registrationId) {
   };
 }
 
-module.exports = { registerDocument, verifyDocument, getRegistrationStatus };
+// ── COMPREHENSIVE ANALYSIS ────────────────────────────────────────────────
+/**
+ * analyzeDocument(fileBuffer, originalName, registrationId?)
+ * ─────────────────────────────────────────────────────────────────
+ * The single entry point for the backend API gateway.
+ * Runs the full analysis pipeline:
+ *   1. ZKP integrity check (register or verify)
+ *   2. C++ Forensics Engine (pixel-level tamper detection)
+ *   3. Python ML Model (semantic segmentation forgery localization)
+ * All engines run in parallel for speed.
+ *
+ * Returns the AnalysisResponse JSON matching the frontend contract.
+ *
+ * @param {Buffer} fileBuffer       - Raw uploaded file bytes
+ * @param {string} originalName     - Original filename
+ * @param {string} [registrationId] - Optional ZKP registration ID for re-verification
+ * @returns {Promise<object>}       - AnalysisResponse for the frontend
+ */
+async function analyzeDocument(fileBuffer, originalName, registrationId = null) {
+  const startTime = Date.now();
+
+  // Save file to temp for CLI engines
+  const tempFilePath = saveTempFile(fileBuffer, originalName);
+
+  // Run all 3 engines in parallel
+  const [zkpResult, forensicsResult, mlResult] = await Promise.allSettled([
+    registrationId
+      ? verifyDocument(fileBuffer, registrationId)
+      : registerDocument(fileBuffer),
+    runForensicsEngine(tempFilePath),
+    runMLModel(tempFilePath),
+  ]);
+
+  const zkp       = zkpResult.status === "fulfilled"       ? zkpResult.value       : null;
+  const forensics = forensicsResult.status === "fulfilled" ? forensicsResult.value : null;
+  const ml        = mlResult.status === "fulfilled"        ? mlResult.value        : null;
+
+  // Clean up temp file
+  cleanupFile(tempFilePath);
+
+  // ── Compute weighted trust score ──
+  // ZKP 25%, Forensics 40%, ML 35%
+  let weightedSum = 0, totalWeight = 0;
+
+  if (zkp && zkp.trustScore != null) {
+    weightedSum += zkp.trustScore * 0.25;
+    totalWeight += 0.25;
+  }
+  if (forensics && forensics.trustScore != null) {
+    weightedSum += forensics.trustScore * 0.40;
+    totalWeight += 0.40;
+  }
+  if (ml && ml.trustScore != null) {
+    weightedSum += ml.trustScore * 0.35;
+    totalWeight += 0.35;
+  }
+
+  const trustScore = totalWeight > 0
+    ? Math.max(0, Math.min(100, Math.round(weightedSum / totalWeight)))
+    : 50; // fallback if no engine produced a score
+
+  // ── Classification ──
+  const classification = trustScore >= 75 ? "SAFE" : trustScore >= 50 ? "SUSPICIOUS" : "REJECT";
+
+  // ── Heatmap regions (ML regions in %, forensics regions converted) ──
+  const heatmapRegions = [];
+
+  if (ml && ml.regions) {
+    for (const r of ml.regions) {
+      heatmapRegions.push({
+        pageIndex: 0,
+        x:      Math.round((r.x / 256) * 100),
+        y:      Math.round((r.y / 256) * 100),
+        width:  Math.round((r.w / 256) * 100),
+        height: Math.round((r.h / 256) * 100),
+        severity: r.confidence >= 0.8 ? "high" : r.confidence >= 0.5 ? "medium" : "low",
+      });
+    }
+  }
+
+  if (forensics && forensics.regions) {
+    for (const r of forensics.regions) {
+      const already = heatmapRegions.some(h => Math.abs(h.x - r.x) < 5 && Math.abs(h.y - r.y) < 5);
+      if (!already) {
+        heatmapRegions.push({
+          pageIndex: 0,
+          x:      Math.round((r.x / 256) * 100),
+          y:      Math.round((r.y / 256) * 100),
+          width:  Math.round((r.w / 256) * 100),
+          height: Math.round((r.h / 256) * 100),
+          severity: (r.confidence || 0) >= 0.8 ? "high" : (r.confidence || 0) >= 0.5 ? "medium" : "low",
+        });
+      }
+    }
+  }
+
+  // ── Breakdown ──
+  const breakdown = {
+    pixelSplice:     "Not Available",
+    fontConsistency: "Not Available",
+    nlpValidation:   "Not Available",
+    zkpIntegrity:    "Not Available",
+  };
+
+  if (forensics && forensics.scores) {
+    const s = forensics.scores;
+    breakdown.pixelSplice     = s.splicing >= 80 ? "Passed" : s.splicing >= 50 ? "Suspicious" : "Detected";
+    breakdown.fontConsistency = s.font >= 80 ? "Passed" : s.font >= 50 ? "Suspicious" : "Failed";
+    breakdown.nlpValidation   = s.nlp >= 80 ? "Passed" : s.nlp >= 50 ? "Suspicious" : "Failed";
+  } else if (ml && ml.scores) {
+    breakdown.pixelSplice = ml.scores.splicing > 20 ? `Detected (Score: ${ml.scores.splicing})` : "Clear";
+  }
+
+  if (zkp) {
+    if (zkp.verdict === "VERIFIED")         breakdown.zkpIntegrity = "Verified";
+    else if (zkp.verdict === "FORGERY_DETECTED") breakdown.zkpIntegrity = "Mismatch from origin";
+    else if (zkp.success && zkp.registrationId)  breakdown.zkpIntegrity = `Registered (${zkp.registrationId})`;
+    else if (zkp.verdict)                        breakdown.zkpIntegrity = zkp.verdict;
+    else                                         breakdown.zkpIntegrity = "Pending";
+  }
+
+  // ── Preview images ──
+  // The backend will handle base64 preview generation; ZKP returns empty array
+  const previewImages = [];
+
+  const processingTimeMs = Date.now() - startTime;
+
+  return {
+    trustScore,
+    classification,
+    heatmapRegions,
+    breakdown,
+    previewImages,
+    meta: {
+      processingTimeMs,
+      enginesUsed: {
+        forensics: forensics !== null,
+        ml:        ml !== null,
+        zkp:       zkp !== null,
+      },
+      zkpRegistrationId: zkp?.registrationId || null,
+      zkpVerdict:        zkp?.verdict || null,
+    },
+  };
+}
+
+module.exports = { registerDocument, verifyDocument, getRegistrationStatus, analyzeDocument };
